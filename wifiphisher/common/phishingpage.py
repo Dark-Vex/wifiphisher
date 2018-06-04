@@ -54,20 +54,26 @@ class PhishingTemplate(object):
 
         # setup all the variables
 
-        config_path = os.path.join(constants.PHISHING_PAGES_DIR, name, 'config.ini')
+        config_path = os.path.join(constants.PHISHING_PAGES_DIR, name,
+                                   'config.ini')
         info = config_section_map(config_path, 'info')
 
         self._name = name
         self._display_name = info['name']
         self._description = info['description']
         self._payload = False
+        self._config_path = os.path.join(constants.PHISHING_PAGES_DIR,
+                                         self._name, 'config.ini')
         if 'payloadpath' in info:
             self._payload = info['payloadpath']
 
-        self._path = constants.PHISHING_PAGES_DIR +\
-            self._name.lower() + "/"
-        self._path_static = constants.PHISHING_PAGES_DIR +\
-            self._name.lower() + "/static/"
+        self._path = os.path.join(constants.PHISHING_PAGES_DIR,
+                                  self._name.lower(),
+                                  constants.SCENARIO_HTML_DIR)
+        self._path_static = os.path.join(constants.PHISHING_PAGES_DIR,
+                                         self._name.lower(),
+                                         constants.SCENARIO_HTML_DIR,
+                                         'static')
 
         self._context = config_section_map(config_path, 'context')
         self._extra_files = []
@@ -98,8 +104,7 @@ class PhishingTemplate(object):
         options = original_config.options('info')
         for option in options:
             if option != "payloadpath":
-                config.set('info', option,
-                           original_config.get('info', option))
+                config.set('info', option, original_config.get('info', option))
             else:
                 dirname = os.path.dirname(
                     original_config.get('info', 'payloadpath'))
@@ -125,8 +130,7 @@ class PhishingTemplate(object):
         :rtype: None
         """
 
-        config_path = os.path.join(constants.PHISHING_PAGES_DIR,
-                                   self._name, 'config.ini')
+        config_path = self._config_path
         self.update_config_file(filename, config_path)
         # update payload attribute
         info = config_section_map(config_path, 'info')
@@ -299,7 +303,7 @@ class TemplateManager(object):
         self._templates = {}
 
         for page in page_dirs:
-            if os.path.isdir(page):
+            if os.path.isdir(page) and self.is_valid_template(page)[0]:
                 self._templates[page] = PhishingTemplate(page)
 
         # add all the user templates to the database
@@ -326,28 +330,25 @@ class TemplateManager(object):
         :return: tuple of is_valid and output string
         :rtype: tuple
         """
-        config = False
+
         html = False
-        # template directory files
-        template = os.listdir(os.path.join(self._template_directory, name))
-        # check everyone file for...
-        for files in template:
-            # html
-            if files.find(".html", 0) != -1:
+        dir_path = os.path.join(self._template_directory, name)
+        # check config file...
+        if not "config.ini" in os.listdir(dir_path):
+            return False, "Configuration file not found in: "
+        try:
+            tdir = os.listdir(os.path.join(dir_path, constants.SCENARIO_HTML_DIR))
+        except OSError:
+            return False, "No " + constants.SCENARIO_HTML_DIR + " directory found in: "
+        # Check HTML files...
+        for tfile in tdir:
+            if tfile.endswith(".html"):
                 html = True
-            # config
-            elif files.find("config.ini", 0) != -1:
-                config = True
-        # and if we found them all return true and template directory name
-        if config and html:
-            return True, name
-        # if not then check what we (not) got
-        elif not config and not html:
-            return False, "Configuration files are not found in: "
-        elif not config:
-            return False, "No config file found in: "
-        elif not html:
+                break
+        if not html:
             return False, "No HTML files found in: "
+        # and if we found them all return true and template directory name
+        return True, name
 
     def find_user_templates(self):
         """
@@ -365,8 +366,8 @@ class TemplateManager(object):
         # loop through the directory content
         for name in os.listdir(self._template_directory):
             # check to see if it is a directory and not in the database
-            if (os.path.isdir(os.path.join(self._template_directory, name)) and
-                    name not in self._templates):
+            if (os.path.isdir(os.path.join(self._template_directory, name))
+                    and name not in self._templates):
                 # check template
                 is_valid, output = self.is_valid_template(name)
                 # if template successfully validated, then...
@@ -374,6 +375,7 @@ class TemplateManager(object):
                     # just add it to the list
                     local_templates.append(name)
                 else:
+                    # TODO: We should throw an exception instead here.
                     # but if not then display which problem occurred
                     print "[" + constants.R + "!" + constants.W + "] " + output + name
 

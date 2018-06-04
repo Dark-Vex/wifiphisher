@@ -13,7 +13,6 @@ import wifiphisher.common.constants as constants
 import wifiphisher.common.recon as recon
 import wifiphisher.common.phishingpage as phishingpage
 
-
 # information for the main terminal
 MainInfo = namedtuple("MainInfo", constants.MAIN_TUI_ATTRS)
 # information for the AP selection terminal
@@ -150,14 +149,14 @@ class TuiTemplateSelection(object):
 
         if key == curses.KEY_DOWN:
             if self.heightlight_number < number_of_sections - 1:
-                page_number = self.sec_page_map[self.heightlight_number+1]
+                page_number = self.sec_page_map[self.heightlight_number + 1]
                 if page_number > self.page_number:
                     self.page_number += 1
                     screen.erase()
                 self.heightlight_number += 1
         elif key == curses.KEY_UP:
             if self.heightlight_number > 0:
-                page_number = self.sec_page_map[self.heightlight_number-1]
+                page_number = self.sec_page_map[self.heightlight_number - 1]
                 if page_number < self.page_number:
                     self.page_number -= 1
                     screen.erase()
@@ -186,8 +185,7 @@ class TuiTemplateSelection(object):
             display_str = "Options: [Up Arrow] Move Up  [Down Arrow] Move Down"
             screen.addstr(0, 0, display_string(max_window_len, display_str))
             display_str = "Available Phishing Scenarios:"
-            screen.addstr(3, 0, display_string(max_window_len,
-                                               display_str),
+            screen.addstr(3, 0, display_string(max_window_len, display_str),
                           curses.A_BOLD)
         except curses.error:
             return 0
@@ -252,7 +250,10 @@ class TuiTemplateSelection(object):
         """
 
         # setup curses
-        curses.curs_set(0)
+        try:
+            curses.curs_set(0)
+        except curses.error:
+            pass
         screen.nodelay(True)
         curses.init_pair(1, curses.COLOR_GREEN, screen.getbkgd())
         # heightlight the phishing scenarios
@@ -462,12 +463,11 @@ class TuiApSel(object):
         # get window height, length and create a box inside
         max_window_height, max_window_length = screen.getmaxyx()
         if max_window_height < 14 or max_window_length < 9:
-            box = curses.newwin(max_window_height,
-                                max_window_length, 0, 0)
+            box = curses.newwin(max_window_height, max_window_length, 0, 0)
             self.renew_box = True
         else:
-            box = curses.newwin(max_window_height-9,
-                                max_window_length-5, 4, 3)
+            box = curses.newwin(max_window_height - 9, max_window_length - 5,
+                                4, 3)
         box.box()
 
         # calculate the box's maximum number of row's
@@ -475,11 +475,9 @@ class TuiApSel(object):
         # subtracting 2 from the height for the border
         max_row = box_height - 2
         key = 0
-        box_info = [max_window_height, max_window_length, max_row,
-                    key]
+        box_info = [max_window_height, max_window_length, max_row, key]
 
-        ap_info = ApDisplayInfo(position, page_number, box,
-                                box_info)
+        ap_info = ApDisplayInfo(position, page_number, box, box_info)
 
         self.mac_matcher = info.mac_matcher
         # start finding access points
@@ -505,7 +503,10 @@ class TuiApSel(object):
         """
         # setup curses
         # make cursor invisible
-        curses.curs_set(0)
+        try:
+            curses.curs_set(0)
+        except curses.error:
+            pass
         # don't wait for user input
         screen.nodelay(True)
         # setup the font color
@@ -524,7 +525,7 @@ class TuiApSel(object):
             if is_done:
                 # turn off access point discovery and return the result
                 self.access_point_finder.stop_finding_access_points()
-                return self.access_points[ap_info.pos-1]
+                return self.access_points[ap_info.pos - 1]
 
         # turn off access point discovery
         self.access_point_finder.stop_finding_access_points()
@@ -607,10 +608,10 @@ class TuiApSel(object):
         # in case arrow up key has been pressed
         elif key == curses.KEY_UP:
             # if not the first item
-            if (pos-1) > 0:
+            if (pos - 1) > 0:
                 # if previous item is in previous page_number, change page
                 # and move up otherwise just move up
-                if (pos-1) % max_row == 0:
+                if (pos - 1) % max_row == 0:
                     pos -= 1
                     page_number -= 1
                 else:
@@ -638,8 +639,8 @@ class TuiApSel(object):
         self.resize_window(screen, ap_info)
 
         # check if any new access points have been discovered
-        new_total_ap_number = len(self.access_point_finder.
-                                  get_all_access_points())
+        new_total_ap_number = len(
+            self.access_point_finder.observed_access_points)
 
         if new_total_ap_number != self.total_ap_number:
             self.access_points = self.access_point_finder.\
@@ -655,8 +656,8 @@ class TuiApSel(object):
         ap_info.key = screen.getch()
         if ap_info.key == ord("\n") and self.total_ap_number != 0:
             # show message and exit
-            screen.addstr(ap_info.max_h-2, 3, "YOU HAVE SELECTED " +
-                          self.access_points[ap_info.pos-1].get_name())
+            screen.addstr(ap_info.max_h - 2, 3, "YOU HAVE SELECTED " +
+                          self.access_points[ap_info.pos - 1].name)
             screen.refresh()
             time.sleep(1)
             is_apsel_end = True
@@ -701,9 +702,10 @@ class TuiApSel(object):
         """
 
         # get the page boundary
-        page_boundary = range(1+(ap_info.max_row*(ap_info.page_number-1)),
-                              ap_info.max_row+1+(
-                                  ap_info.max_row*(ap_info.page_number-1)))
+        page_boundary = range(1 + (ap_info.max_row *
+                                   (ap_info.page_number - 1)),
+                              ap_info.max_row + 1 +
+                              (ap_info.max_row * (ap_info.page_number - 1)))
 
         # remove previous content and draw border
         ap_info.box.erase()
@@ -711,19 +713,15 @@ class TuiApSel(object):
 
         # show the header
         header_fmt = "{0:30} {1:16} {2:3} {3:4} {4:9} {5:5} {6:20}"
-        header = header_fmt.format("ESSID", "BSSID", "CH",
-                                   "PWR", "ENCR", "CLIENTS",
-                                   "VENDOR")
+        header = header_fmt.format("ESSID", "BSSID", "CH", "PWR", "ENCR",
+                                   "CLIENTS", "VENDOR")
         opt_str = ("Options:  [Esc] Quit  [Up Arrow] Move Up  "
                    "[Down Arrow] Move Down")
 
         try:
             window_l = screen.getmaxyx()[1]
-            screen.addstr(1, 3,
-                          display_string(window_l - 3, opt_str))
-            screen.addstr(3, 5,
-                          display_string(window_l - 5,
-                                         header))
+            screen.addstr(1, 3, display_string(window_l - 3, opt_str))
+            screen.addstr(3, 5, display_string(window_l - 5, header))
         except curses.error:
             return
 
@@ -742,21 +740,18 @@ class TuiApSel(object):
             # in case of at least one access point
             else:
                 # get the access point and it's vendor
-                access_point = self.access_points[item_position-1]
+                access_point = self.access_points[item_position - 1]
                 vendor = self.mac_matcher.get_vendor_name(
-                    access_point.get_mac_address())
+                    access_point.mac_address)
 
                 # the display format for showing access points
-                display_text = (("{0:30} {1:17} {2:2} {3:3}% {4:^7} {5:^5}"
-                                 " {6:20}")
-                                .format(access_point.get_name(),
-                                        access_point.get_mac_address(),
-                                        access_point.get_channel(),
-                                        access_point.get_signal_strength(),
-                                        access_point.get_encryption(),
-                                        access_point.
-                                        get_number_connected_clients(),
-                                        vendor))
+                display_text = ((
+                    "{0:30} {1:17} {2:2} {3:3}% {4:^7} {5:^5}"
+                    " {6:20}").format(
+                        access_point.name, access_point.mac_address,
+                        access_point.channel, access_point.signal_strength,
+                        access_point.encryption,
+                        access_point.get_number_connected_clients(), vendor))
                 # shows whether the access point should be highlighted or not
                 # based on our current position
                 print_row_number = item_position - ap_info.max_row * (
@@ -767,15 +762,15 @@ class TuiApSel(object):
 
                     if item_position == ap_info.pos:
                         ap_info.box.addstr(print_row_number, 2,
-                                           display_string(ap_info.max_l - 2,
-                                                          display_text),
+                                           display_string(
+                                               ap_info.max_l - 2,
+                                               display_text),
                                            self.highlight_text)
                     else:
-                        ap_info.box.addstr(
-                            print_row_number,
-                            2, display_string(ap_info.max_l - 2,
-                                              display_text),
-                            self.normal_text)
+                        ap_info.box.addstr(print_row_number, 2,
+                                           display_string(
+                                               ap_info.max_l - 2,
+                                               display_text), self.normal_text)
                 except curses.error:
                     return
 
@@ -792,6 +787,7 @@ class TuiMain(object):
     """
     TuiMain class to represent the main terminal window
     """
+
     def __init__(self):
         """
         Construct the class
@@ -819,7 +815,10 @@ class TuiMain(object):
         """
 
         # setup curses
-        curses.curs_set(0)
+        try:
+            curses.curs_set(0)
+        except curses.error:
+            pass
         screen.nodelay(True)
         curses.init_pair(1, curses.COLOR_BLUE, screen.getbkgd())
         curses.init_pair(2, curses.COLOR_YELLOW, screen.getbkgd())
@@ -889,8 +888,7 @@ class TuiMain(object):
             start_col += len(for_or_with)
 
             # resource url
-            screen.addstr(start_row_num, start_col, resource,
-                          self.yellow_text)
+            screen.addstr(start_row_num, start_col, resource, self.yellow_text)
 
             start_row_num += 1
 
@@ -927,12 +925,10 @@ class TuiMain(object):
                           "|" + " AP interface: " + info.ap_iface)
             screen.addstr(5, max_window_length - 30,
                           "|" + " Options: [Esc] Quit")
-            screen.addstr(6, max_window_length - 30, "|" + "_"*29)
+            screen.addstr(6, max_window_length - 30, "|" + "_" * 29)
 
-            # make Deauthenticating clients to blue color
-            # print the deauthentication section
-            screen.addstr(1, 0, "Deauthenticating clients: ",
-                          self.blue_text)
+            # Print the extensions section
+            screen.addstr(1, 0, "Extensions feed: ", self.blue_text)
         except curses.error:
             pass
 
@@ -944,17 +940,17 @@ class TuiMain(object):
                 raw_num += 1
         try:
             # print the dhcp lease section
-            screen.addstr(7, 0, "DHCP Leases", self.blue_text)
+            screen.addstr(7, 0, "DHCP Leases: ", self.blue_text)
             if os.path.isfile('/var/lib/misc/dnsmasq.leases'):
-                dnsmasq_output = check_output(['tail', '-5',
-                                               '/var/lib/misc/dnsmasq.leases'])
+                dnsmasq_output = check_output(
+                    ['head', '-5', '/var/lib/misc/dnsmasq.leases'])
                 screen.addstr(8, 0, dnsmasq_output)
 
             # print the http request section
             screen.addstr(13, 0, "HTTP requests: ", self.blue_text)
             if os.path.isfile('/tmp/wifiphisher-webserver.tmp'):
-                http_output = check_output(['tail', '-5',
-                                            '/tmp/wifiphisher-webserver.tmp'])
+                http_output = check_output(
+                    ['tail', '-5', '/tmp/wifiphisher-webserver.tmp'])
                 self.print_http_requests(screen, 14, http_output)
         except curses.error:
             pass
@@ -996,5 +992,5 @@ def line_splitter(num_of_words, line):
     :rtype: tuple
     """
     pieces = line.split()
-    return (" ".join(pieces[i:i+num_of_words])
+    return (" ".join(pieces[i:i + num_of_words])
             for i in xrange(0, len(pieces), num_of_words))

